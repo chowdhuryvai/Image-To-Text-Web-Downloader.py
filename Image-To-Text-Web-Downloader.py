@@ -9,7 +9,7 @@
 ║     Works with Python Built-in Libraries Only               ║
 ║                                                              ║
 ║     Developed by: CHOWDHURY-VAI                             ║
-║     Version: 4.2.0 - Auto Install Edition                   ║
+║     Version: 4.3.0 - Smart Save Edition                     ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
 """
@@ -60,7 +60,7 @@ except ImportError:
 class Config:
     """Application Configuration"""
     APP_NAME = "Image To Text & Web Downloader"
-    VERSION = "4.2.0"
+    VERSION = "4.3.0"
     DEVELOPER = "CHOWDHURY-VAI"
     
     # Paths
@@ -376,8 +376,8 @@ class PureWebScraper:
             print(f"Download error: {e}")
             return False
     
-    def download_all_images(self, url, quality='high'):
-        """Download all images from a webpage"""
+    def download_all_images(self, url, download_dir, quality='high'):
+        """Download all images from a webpage to specified directory"""
         try:
             is_valid, normalized_url = self.validate_url(url)
             if not is_valid:
@@ -385,7 +385,9 @@ class PureWebScraper:
             
             domain = urlparse(normalized_url).netloc
             safe_domain = re.sub(r'[^\w\-_\.]', '_', domain)
-            domain_dir = os.path.join(Config.DOWNLOAD_DIR, safe_domain)
+            
+            # Use the specified download directory
+            domain_dir = os.path.join(download_dir, safe_domain)
             os.makedirs(domain_dir, exist_ok=True)
             
             print(f"\n🔍 Scanning: {normalized_url}")
@@ -518,27 +520,12 @@ class PureOCR:
         except:
             pass
         
-        # Check if tesseract is available via type command
-        try:
-            result = subprocess.run(['type', 'tesseract'], 
-                                   capture_output=True, text=True, timeout=5, 
-                                   shell=True)
-            if result.returncode == 0:
-                match = re.search(r'tesseract is (/.+?/tesseract)', result.stdout)
-                if match:
-                    tesseract_path = match.group(1)
-                    if os.path.exists(tesseract_path):
-                        return tesseract_path
-        except:
-            pass
-        
         return None
     
     def is_available(self):
         """Check if Tesseract is available"""
         if self.tesseract_cmd and os.path.exists(self.tesseract_cmd):
             try:
-                # Verify tesseract actually works
                 result = subprocess.run([self.tesseract_cmd, '--version'], 
                                        capture_output=True, text=True, timeout=5)
                 return result.returncode == 0
@@ -595,7 +582,6 @@ class PureOCR:
         output_file = None
         output_base = None
         try:
-            # Create temp output file
             fd, output_base = tempfile.mkstemp(suffix='_ocr')
             os.close(fd)
             
@@ -629,7 +615,6 @@ class PureOCR:
         except Exception as e:
             return f"Error extracting text: {str(e)}"
         finally:
-            # Cleanup
             if output_file and os.path.exists(output_file):
                 try:
                     os.remove(output_file)
@@ -652,7 +637,7 @@ class PureOCR:
 
 # ==================== AUTO TESSERACT INSTALLER ====================
 class TesseractInstaller:
-    """Auto-install Tesseract OCR - Enhanced for all Linux distributions"""
+    """Auto-install Tesseract OCR"""
     
     @staticmethod
     def _detect_linux_distro():
@@ -664,7 +649,6 @@ class TesseractInstaller:
             'install_cmd': 'unknown'
         }
         
-        # Check /etc/os-release (most modern distros)
         if os.path.exists('/etc/os-release'):
             with open('/etc/os-release', 'r') as f:
                 content = f.read().lower()
@@ -694,7 +678,6 @@ class TesseractInstaller:
                     distro_info['name'] = 'solus'
                     distro_info['package_manager'] = 'eopkg'
         
-        # Check for legacy distros
         if distro_info['name'] == 'unknown' and os.path.exists('/etc/debian_version'):
             distro_info['name'] = 'debian'
             distro_info['package_manager'] = 'apt'
@@ -708,155 +691,16 @@ class TesseractInstaller:
         return distro_info
     
     @staticmethod
-    def _run_command_with_sudo(cmd, password=None):
-        """Run command with sudo, optionally providing password"""
+    def _run_command_with_sudo(cmd):
+        """Run command with sudo"""
         try:
-            if password:
-                # Use sudo with password via stdin
-                full_cmd = ['sudo', '-S'] + cmd
-                result = subprocess.run(
-                    full_cmd,
-                    input=password + '\n',
-                    capture_output=True,
-                    text=True,
-                    timeout=300
-                )
-            else:
-                # Try without password first (if NOPASSWD is set)
-                full_cmd = ['sudo'] + cmd
-                result = subprocess.run(
-                    full_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=300
-                )
-            
+            full_cmd = ['sudo'] + cmd
+            result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=300)
             return result.returncode == 0, result.stdout, result.stderr
         except subprocess.TimeoutExpired:
             return False, "", "Command timed out"
         except Exception as e:
             return False, "", str(e)
-    
-    @staticmethod
-    def _install_debian_based():
-        """Install on Debian/Ubuntu based systems"""
-        print("📦 Installing Tesseract on Debian/Ubuntu...")
-        
-        # Try multiple methods
-        methods = [
-            # Method 1: Direct apt-get with sudo
-            lambda: TesseractInstaller._run_command_with_sudo(
-                ['apt-get', 'update', '-y']
-            ),
-            # Method 2: apt-get without update first
-            lambda: (True, "", ""),
-        ]
-        
-        # Try update first
-        print("🔄 Updating package list...")
-        success, stdout, stderr = methods[0]()
-        if not success:
-            print("⚠️  Could not update, trying without update...")
-        
-        # Install packages
-        print("📥 Installing tesseract-ocr...")
-        success, stdout, stderr = TesseractInstaller._run_command_with_sudo(
-            ['apt-get', 'install', '-y', 'tesseract-ocr', 'tesseract-ocr-eng', 'tesseract-ocr-ben']
-        )
-        
-        if success:
-            print("✅ Installation successful!")
-            return True
-        else:
-            print(f"⚠️  APT install failed: {stderr}")
-            
-            # Try with pkexec
-            print("🔄 Trying pkexec...")
-            try:
-                result = subprocess.run(
-                    ['pkexec', 'apt-get', 'install', '-y', 'tesseract-ocr', 'tesseract-ocr-eng', 'tesseract-ocr-ben'],
-                    capture_output=True,
-                    text=True,
-                    timeout=300
-                )
-                if result.returncode == 0:
-                    print("✅ Installation successful via pkexec!")
-                    return True
-            except:
-                pass
-            
-            return False
-    
-    @staticmethod
-    def _install_redhat_based():
-        """Install on Fedora/RHEL based systems"""
-        print("📦 Installing Tesseract on Fedora/RHEL...")
-        
-        # Try DNF first
-        success, stdout, stderr = TesseractInstaller._run_command_with_sudo(
-            ['dnf', 'install', '-y', 'tesseract', 'tesseract-langpack-eng', 'tesseract-langpack-ben']
-        )
-        
-        if success:
-            print("✅ Installation successful!")
-            return True
-        
-        # Try YUM as fallback
-        print("🔄 Trying yum...")
-        success, stdout, stderr = TesseractInstaller._run_command_with_sudo(
-            ['yum', 'install', '-y', 'tesseract', 'tesseract-langpack-eng', 'tesseract-langpack-ben']
-        )
-        
-        if success:
-            print("✅ Installation successful!")
-            return True
-        
-        return False
-    
-    @staticmethod
-    def _install_arch_based():
-        """Install on Arch based systems"""
-        print("📦 Installing Tesseract on Arch...")
-        
-        success, stdout, stderr = TesseractInstaller._run_command_with_sudo(
-            ['pacman', '-S', '--noconfirm', 'tesseract', 'tesseract-data-eng', 'tesseract-data-ben']
-        )
-        
-        if success:
-            print("✅ Installation successful!")
-            return True
-        
-        return False
-    
-    @staticmethod
-    def _install_other_distro(package_manager):
-        """Install on other distributions"""
-        print(f"📦 Installing Tesseract using {package_manager}...")
-        
-        install_commands = {
-            'zypper': ['zypper', 'install', '-y', 'tesseract-ocr', 'tesseract-ocr-traineddata-english', 'tesseract-ocr-traineddata-bengali'],
-            'apk': ['apk', 'add', 'tesseract-ocr', 'tesseract-ocr-data-eng', 'tesseract-ocr-data-ben'],
-            'xbps': ['xbps-install', '-Sy', 'tesseract-ocr', 'tesseract-ocr-eng', 'tesseract-ocr-ben'],
-            'emerge': ['emerge', 'app-text/tesseract'],
-            'eopkg': ['eopkg', 'install', '-y', 'tesseract'],
-        }
-        
-        if package_manager in install_commands:
-            cmd = install_commands[package_manager]
-            if package_manager != 'apk':  # apk already runs as root
-                success, stdout, stderr = TesseractInstaller._run_command_with_sudo(cmd)
-            else:
-                try:
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-                    success = result.returncode == 0
-                except:
-                    success = False
-            
-            if success:
-                print("✅ Installation successful!")
-                return True
-        
-        return False
     
     @staticmethod
     def install():
@@ -872,19 +716,62 @@ class TesseractInstaller:
                 print(f"🐧 Detected: {distro['name'].upper()} Linux")
                 print(f"📦 Package Manager: {distro['package_manager']}")
                 
-                # Try installation based on detected distro
                 if distro['package_manager'] == 'apt':
-                    return TesseractInstaller._install_debian_based()
+                    print("📥 Installing tesseract-ocr, tesseract-ocr-eng, tesseract-ocr-ben...")
+                    success, stdout, stderr = TesseractInstaller._run_command_with_sudo(
+                        ['apt-get', 'update', '-y']
+                    )
+                    success, stdout, stderr = TesseractInstaller._run_command_with_sudo(
+                        ['apt-get', 'install', '-y', 'tesseract-ocr', 'tesseract-ocr-eng', 'tesseract-ocr-ben']
+                    )
+                    if success:
+                        print("✅ Installation successful!")
+                        return True
+                
                 elif distro['package_manager'] in ('dnf', 'yum'):
-                    return TesseractInstaller._install_redhat_based()
+                    print("📥 Installing tesseract...")
+                    pkg_mgr = distro['package_manager']
+                    success, stdout, stderr = TesseractInstaller._run_command_with_sudo(
+                        [pkg_mgr, 'install', '-y', 'tesseract', 'tesseract-langpack-eng', 'tesseract-langpack-ben']
+                    )
+                    if success:
+                        print("✅ Installation successful!")
+                        return True
+                
                 elif distro['package_manager'] == 'pacman':
-                    return TesseractInstaller._install_arch_based()
+                    print("📥 Installing tesseract...")
+                    success, stdout, stderr = TesseractInstaller._run_command_with_sudo(
+                        ['pacman', '-S', '--noconfirm', 'tesseract', 'tesseract-data-eng', 'tesseract-data-ben']
+                    )
+                    if success:
+                        print("✅ Installation successful!")
+                        return True
+                
+                elif distro['package_manager'] == 'zypper':
+                    print("📥 Installing tesseract...")
+                    success, stdout, stderr = TesseractInstaller._run_command_with_sudo(
+                        ['zypper', 'install', '-y', 'tesseract-ocr', 'tesseract-ocr-traineddata-english', 'tesseract-ocr-traineddata-bengali']
+                    )
+                    if success:
+                        print("✅ Installation successful!")
+                        return True
+                
                 else:
-                    return TesseractInstaller._install_other_distro(distro['package_manager'])
+                    print(f"⚠️  Unknown package manager: {distro['package_manager']}")
+                
+                return False
             
             elif system == 'darwin':
-                # macOS installation
-                return TesseractInstaller._install_macos()
+                try:
+                    result = subprocess.run(['which', 'brew'], capture_output=True, text=True)
+                    if result.returncode == 0:
+                        subprocess.run(['brew', 'install', 'tesseract'], check=False)
+                        subprocess.run(['brew', 'install', 'tesseract-lang'], check=False)
+                        print("✅ Installation successful!")
+                        return True
+                except:
+                    pass
+                return False
             
             else:
                 print(f"⚠️  Automatic installation not supported on {system}")
@@ -892,25 +779,6 @@ class TesseractInstaller:
                 
         except Exception as e:
             print(f"❌ Installation error: {e}")
-            return False
-    
-    @staticmethod
-    def _install_macos():
-        """Install on macOS using Homebrew"""
-        print("🍎 Installing Tesseract on macOS...")
-        
-        try:
-            # Check for Homebrew
-            result = subprocess.run(['which', 'brew'], capture_output=True, text=True)
-            if result.returncode == 0:
-                subprocess.run(['brew', 'install', 'tesseract'], check=False)
-                subprocess.run(['brew', 'install', 'tesseract-lang'], check=False)
-                print("✅ Installation successful!")
-                return True
-            else:
-                print("⚠️  Homebrew not found")
-                return False
-        except:
             return False
 
 
@@ -959,6 +827,7 @@ if GUI_AVAILABLE:
             self.ocr = PureOCR()
             self.current_image_path = None
             self.processing = False
+            self.last_download_dir = Config.DOWNLOAD_DIR  # Track last download directory
             
             # Create GUI
             self.setup_menu()
@@ -978,6 +847,8 @@ if GUI_AVAILABLE:
             menubar.add_cascade(label="📁 File", menu=file_menu)
             file_menu.add_command(label="📂 Open Image", command=self.open_image)
             file_menu.add_command(label="💾 Save Text", command=self.save_text)
+            file_menu.add_separator()
+            file_menu.add_command(label="📥 Set Download Location", command=self.set_download_location)
             file_menu.add_separator()
             file_menu.add_command(label="❌ Exit", command=self.root.quit)
             
@@ -1025,7 +896,7 @@ if GUI_AVAILABLE:
             
             tk.Label(
                 header_frame,
-                text=f"Developed by {Config.DEVELOPER} | v{Config.VERSION} | Auto-Install Edition",
+                text=f"Developed by {Config.DEVELOPER} | v{Config.VERSION} | Smart Save Edition",
                 font=('Arial', 9),
                 fg=self.colors['text_dim'],
                 bg=self.colors['bg_medium']
@@ -1084,9 +955,45 @@ if GUI_AVAILABLE:
             )
             frame.pack(fill='both', expand=True)
             
+            # Current save location display
+            save_location_frame = tk.Frame(frame, bg=self.colors['bg_light'])
+            save_location_frame.pack(fill='x', pady=(0, 10))
+            
+            tk.Label(save_location_frame, text="📁 Save Location:", font=('Arial', 10, 'bold'),
+                    fg=self.colors['text'], bg=self.colors['bg_light']).pack(anchor='w')
+            
+            location_display_frame = tk.Frame(save_location_frame, bg=self.colors['input_bg'], relief='flat', bd=2)
+            location_display_frame.pack(fill='x', pady=(5, 0))
+            
+            self.save_location_var = tk.StringVar(value=self.last_download_dir)
+            self.save_location_label = tk.Label(
+                location_display_frame, 
+                textvariable=self.save_location_var,
+                font=('Arial', 8),
+                fg=self.colors['accent_green'],
+                bg=self.colors['input_bg'],
+                anchor='w',
+                padx=10,
+                pady=5
+            )
+            self.save_location_label.pack(side='left', fill='x', expand=True)
+            
+            tk.Button(
+                location_display_frame, 
+                text="📂 Change", 
+                command=self.set_download_location,
+                bg=self.colors['button'],
+                fg=self.colors['text'],
+                relief='flat',
+                cursor='hand2',
+                padx=10,
+                pady=3,
+                font=('Arial', 8)
+            ).pack(side='right', padx=5, pady=3)
+            
             # URL Input
             tk.Label(frame, text="Website URL:", font=('Arial', 10), 
-                    fg=self.colors['text'], bg=self.colors['bg_light']).pack(anchor='w', pady=(0, 5))
+                    fg=self.colors['text'], bg=self.colors['bg_light']).pack(anchor='w', pady=(10, 5))
             
             url_frame = tk.Frame(frame, bg=self.colors['bg_light'])
             url_frame.pack(fill='x', pady=(0, 15))
@@ -1126,7 +1033,7 @@ if GUI_AVAILABLE:
             self.progress_label.pack(anchor='w', pady=(0, 10))
             
             # Download button
-            self.download_btn = tk.Button(frame, text="🚀 DOWNLOAD ALL IMAGES", command=self.start_download,
+            self.download_btn = tk.Button(frame, text="🚀 START DOWNLOAD", command=self.start_download_with_save_dialog,
                                          font=('Arial', 11, 'bold'), bg=self.colors['accent_green'],
                                          fg='white', relief='flat', cursor='hand2', pady=8)
             self.download_btn.pack(fill='x', pady=(0, 10))
@@ -1211,23 +1118,120 @@ if GUI_AVAILABLE:
                      bg=self.colors['accent_red'], fg='white', relief='flat', cursor='hand2',
                      padx=15, pady=5).pack(side='right')
         
-        # ==================== AUTO INSTALL & CHECK ====================
+        # ==================== SAVE DIALOG & DOWNLOAD ====================
+        def set_download_location(self):
+            """Set download location"""
+            folder = filedialog.askdirectory(
+                title="Select Download Location",
+                initialdir=self.last_download_dir
+            )
+            if folder:
+                self.last_download_dir = folder
+                self.save_location_var.set(folder)
+                self.status_label.config(
+                    text=f"📁 Download location set: {folder}",
+                    fg=self.colors['accent_green']
+                )
+                
+                # Save preference
+                try:
+                    with open(os.path.join(Config.BASE_DIR, 'download_pref.json'), 'w') as f:
+                        json.dump({'last_download_dir': folder}, f)
+                except:
+                    pass
+        
+        def start_download_with_save_dialog(self):
+            """Start download with save location dialog"""
+            url = self.url_entry.get().strip()
+            
+            if not url or url == "https://":
+                messagebox.showwarning("⚠️ Warning", "Please enter a valid URL first!")
+                return
+            
+            if self.processing:
+                messagebox.showwarning("⚠️ Warning", "Already processing. Please wait.")
+                return
+            
+            # Show save dialog
+            domain = urlparse(url).netloc if url.startswith(('http://', 'https://')) else urlparse('https://' + url).netloc
+            safe_domain = re.sub(r'[^\w\-_\.]', '_', domain)
+            
+            # Ask user where to save
+            save_location = filedialog.askdirectory(
+                title=f"💾 Select Save Location for: {safe_domain}",
+                initialdir=self.last_download_dir,
+                mustexist=False
+            )
+            
+            if not save_location:
+                # User cancelled
+                self.status_label.config(
+                    text="❌ Download cancelled - No location selected",
+                    fg=self.colors['accent_orange']
+                )
+                return
+            
+            # Update last download directory
+            self.last_download_dir = save_location
+            self.save_location_var.set(save_location)
+            
+            # Save preference
+            try:
+                with open(os.path.join(Config.BASE_DIR, 'download_pref.json'), 'w') as f:
+                    json.dump({'last_download_dir': save_location}, f)
+            except:
+                pass
+            
+            # Show download info
+            info_msg = f"""
+📥 Ready to Download Images
+
+🌐 Website: {url}
+📁 Save Location: {save_location}
+📂 Subfolder: {os.path.join(save_location, safe_domain)}
+
+Click 'OK' to start downloading.
+            """
+            
+            if messagebox.askokcancel("Confirm Download", info_msg.strip()):
+                # Start download
+                self.processing = True
+                quality = self.quality_var.get()
+                
+                self.download_btn.config(state='disabled', text="⏳ Downloading...", bg=self.colors['accent_orange'])
+                self.status_label.config(text="📥 Downloading images...", fg=self.colors['accent_orange'])
+                self.progress_var.set(0)
+                self.progress_label.config(text="Starting...")
+                self.download_result.config(text="")
+                
+                def download_thread():
+                    try:
+                        result = self.web_scraper.download_all_images(url, save_location, quality)
+                        self.root.after(0, lambda: self.download_complete(result))
+                    except Exception as e:
+                        self.root.after(0, lambda: self.download_error(str(e)))
+                
+                thread = threading.Thread(target=download_thread, daemon=True)
+                thread.start()
+            else:
+                self.status_label.config(
+                    text="❌ Download cancelled by user",
+                    fg=self.colors['text_dim']
+                )
+        
         def check_and_auto_install_tesseract(self):
             """Check Tesseract status and auto-install if missing"""
             if self.ocr.is_available():
-                # Tesseract found - update status
                 self.update_tesseract_status()
             else:
-                # Tesseract not found - ask to auto-install
                 self.status_label.config(
                     text="🔍 Tesseract not found. Preparing auto-install...",
                     fg=self.colors['accent_orange']
                 )
                 self.root.update()
                 
-                # Ask user
                 response = messagebox.askyesno(
-                    "Tesseract OCR Required",
+                    "🔧 Tesseract OCR Required",
                     "Tesseract OCR is needed for text extraction from images.\n\n"
                     "Do you want to install it automatically?\n\n"
                     "✅ Automatic installation (recommended)\n"
@@ -1247,15 +1251,13 @@ if GUI_AVAILABLE:
                     )
         
         def auto_install_tesseract(self):
-            """Automatically install Tesseract with progress tracking"""
-            # Disable extract button during install
+            """Automatically install Tesseract"""
             self.extract_btn.config(state='disabled', text="⏳ Installing Tesseract...")
             self.status_label.config(
                 text="📦 Installing Tesseract... Please wait...",
                 fg=self.colors['accent_orange']
             )
             
-            # Show installation dialog
             install_window = tk.Toplevel(self.root)
             install_window.title("Installing Tesseract")
             install_window.geometry("500x300")
@@ -1263,7 +1265,6 @@ if GUI_AVAILABLE:
             install_window.transient(self.root)
             install_window.grab_set()
             
-            # Center the window
             install_window.update_idletasks()
             x = self.root.winfo_x() + (self.root.winfo_width() - 500) // 2
             y = self.root.winfo_y() + (self.root.winfo_height() - 300) // 2
@@ -1306,7 +1307,6 @@ if GUI_AVAILABLE:
                         status_text.insert('end', "🔄 Verifying installation...\n")
                         install_window.update()
                         
-                        # Re-initialize OCR
                         self.ocr = PureOCR()
                         
                         if self.ocr.is_available():
@@ -1319,15 +1319,15 @@ if GUI_AVAILABLE:
                                 install_window.destroy(),
                                 self.update_tesseract_status(),
                                 messagebox.showinfo(
-                                    "Success",
-                                    f"✅ Tesseract installed successfully!\n\n"
+                                    "✅ Success",
+                                    f"Tesseract installed successfully!\n\n"
                                     f"Version: {version}\n"
                                     f"Languages: {', '.join(langs)}\n\n"
                                     "You can now extract text from images."
                                 )
                             ])
                         else:
-                            status_text.insert('end', "⚠️ Installed but not detected. Please restart the app.\n")
+                            status_text.insert('end', "⚠️ Installed but not detected. Please restart.\n")
                             install_window.after(2000, lambda: [
                                 install_window.destroy(),
                                 self.status_label.config(
@@ -1371,7 +1371,7 @@ if GUI_AVAILABLE:
         def reinstall_tesseract(self):
             """Reinstall Tesseract from Tools menu"""
             response = messagebox.askyesno(
-                "Reinstall Tesseract",
+                "🔧 Reinstall Tesseract",
                 "This will reinstall Tesseract OCR.\n\n"
                 "Use this if:\n"
                 "• Tesseract is not working properly\n"
@@ -1411,7 +1411,6 @@ if GUI_AVAILABLE:
                     fg=self.colors['accent_green']
                 )
                 
-                # Update language options
                 if not has_ben:
                     self.lang_var.set("English")
             else:
@@ -1436,57 +1435,52 @@ if GUI_AVAILABLE:
             if total > 0:
                 progress = (current / total) * 100
                 self.progress_var.set(progress)
-                self.progress_label.config(text=f"Downloading: {current}/{total}")
+                self.progress_label.config(text=f"📥 Downloading: {current}/{total} ({progress:.0f}%)")
                 self.root.update_idletasks()
-        
-        def start_download(self):
-            """Start download"""
-            url = self.url_entry.get().strip()
-            
-            if not url or url == "https://":
-                messagebox.showwarning("Warning", "Please enter a valid URL")
-                return
-            
-            if self.processing:
-                messagebox.showwarning("Warning", "Already processing")
-                return
-            
-            self.processing = True
-            quality = self.quality_var.get()
-            
-            self.download_btn.config(state='disabled', text="⏳ Downloading...", bg=self.colors['accent_orange'])
-            self.status_label.config(text="📥 Downloading...", fg=self.colors['accent_orange'])
-            
-            def download_thread():
-                try:
-                    result = self.web_scraper.download_all_images(url, quality)
-                    self.root.after(0, lambda: self.download_complete(result))
-                except Exception as e:
-                    self.root.after(0, lambda: self.download_error(str(e)))
-            
-            thread = threading.Thread(target=download_thread, daemon=True)
-            thread.start()
         
         def download_complete(self, result):
             """Download complete"""
             self.processing = False
-            self.download_btn.config(state='normal', text="🚀 DOWNLOAD ALL IMAGES", bg=self.colors['accent_green'])
+            self.download_btn.config(state='normal', text="🚀 START DOWNLOAD", bg=self.colors['accent_green'])
             
             if result['success']:
-                msg = f"✅ {result['downloaded']}/{result['total']} images\n📁 {result['folder']}"
-                self.download_result.config(text=msg, fg=self.colors['accent_green'])
-                self.status_label.config(text=f"✅ Downloaded {result['downloaded']} images", fg=self.colors['accent_green'])
-                messagebox.showinfo("Success", f"Downloaded {result['downloaded']} images!\n\n{result['folder']}")
+                downloaded = result['downloaded']
+                total = result['total']
+                folder = result['folder']
+                
+                self.download_result.config(
+                    text=f"✅ Success! {downloaded}/{total} images downloaded\n📁 {folder}",
+                    fg=self.colors['accent_green']
+                )
+                
+                self.status_label.config(
+                    text=f"✅ Downloaded {downloaded} images to {folder}",
+                    fg=self.colors['accent_green']
+                )
+                
+                # Show success and ask to open folder
+                if messagebox.askyesno(
+                    "✅ Download Complete",
+                    f"Successfully downloaded {downloaded} of {total} images!\n\n"
+                    f"📁 Location: {folder}\n\n"
+                    "Open folder now?"
+                ):
+                    self.open_folder(folder)
+            
             else:
-                self.download_result.config(text=f"❌ {result['message']}", fg=self.colors['accent_red'])
-                self.status_label.config(text="❌ Failed", fg=self.colors['accent_red'])
-                messagebox.showerror("Error", result['message'])
+                self.download_result.config(
+                    text=f"❌ {result.get('message', 'Download failed')}",
+                    fg=self.colors['accent_red']
+                )
+                self.status_label.config(text="❌ Download failed", fg=self.colors['accent_red'])
         
         def download_error(self, error_msg):
             """Download error"""
             self.processing = False
-            self.download_btn.config(state='normal', text="🚀 DOWNLOAD ALL IMAGES", bg=self.colors['accent_green'])
-            messagebox.showerror("Error", f"Download failed:\n{error_msg}")
+            self.download_btn.config(state='normal', text="🚀 START DOWNLOAD", bg=self.colors['accent_green'])
+            self.download_result.config(text=f"❌ Error: {error_msg}", fg=self.colors['accent_red'])
+            self.status_label.config(text=f"❌ Error: {error_msg[:50]}...", fg=self.colors['accent_red'])
+            messagebox.showerror("❌ Download Error", f"Download failed:\n\n{error_msg}")
         
         def open_image(self):
             """Open image"""
@@ -1508,16 +1502,16 @@ if GUI_AVAILABLE:
         def extract_text_from_image(self):
             """Extract text"""
             if not self.current_image_path:
-                messagebox.showwarning("Warning", "Please select an image first!")
+                messagebox.showwarning("⚠️ Warning", "Please select an image first!")
                 return
             
             if self.processing:
-                messagebox.showwarning("Warning", "Already processing")
+                messagebox.showwarning("⚠️ Warning", "Already processing. Please wait.")
                 return
             
             if not self.ocr.is_available():
                 response = messagebox.askyesno(
-                    "Tesseract Required",
+                    "🔧 Tesseract Required",
                     "Tesseract OCR is not installed.\n\n"
                     "Do you want to install it now?"
                 )
@@ -1555,7 +1549,7 @@ if GUI_AVAILABLE:
             self.status_label.config(text=f"✅ Extracted: {words} words", fg=self.colors['accent_green'])
             
             if not text.startswith(('Error', '⚠️', 'No text')):
-                messagebox.showinfo("Success", f"Text extracted!\nWords: {words}")
+                messagebox.showinfo("✅ Success", f"Text extracted successfully!\n\nWords: {words}")
         
         def extraction_error(self, error_msg):
             """Extraction error"""
@@ -1563,6 +1557,7 @@ if GUI_AVAILABLE:
             self.extract_btn.config(state='normal', text="🔍 EXTRACT TEXT", bg=self.colors['accent_purple'])
             self.text_display.delete(1.0, 'end')
             self.text_display.insert(1.0, f"❌ Error:\n{error_msg}")
+            self.status_label.config(text=f"❌ Extraction error", fg=self.colors['accent_red'])
         
         def copy_text(self):
             """Copy text"""
@@ -1570,53 +1565,54 @@ if GUI_AVAILABLE:
             if text and not text.startswith("⏳"):
                 self.root.clipboard_clear()
                 self.root.clipboard_append(text)
-                self.status_label.config(text="📋 Copied!", fg=self.colors['accent_green'])
+                self.status_label.config(text="📋 Text copied to clipboard!", fg=self.colors['accent_green'])
             else:
-                messagebox.showwarning("Warning", "No text to copy!")
+                messagebox.showwarning("⚠️ Warning", "No text to copy!")
         
         def save_text(self):
             """Save text"""
             text = self.text_display.get(1.0, 'end').strip()
             if not text or text.startswith("⏳"):
-                messagebox.showwarning("Warning", "No text to save!")
+                messagebox.showwarning("⚠️ Warning", "No text to save!")
                 return
             
             file_path = filedialog.asksaveasfilename(
-                title="Save Text",
+                title="💾 Save Text As",
                 defaultextension=".txt",
-                filetypes=[("Text", "*.txt"), ("All", "*.*")]
+                initialdir=Config.OUTPUT_DIR,
+                filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")]
             )
             
             if file_path:
                 try:
                     with open(file_path, 'w', encoding='utf-8') as f:
                         f.write(text)
-                    self.status_label.config(text=f"💾 Saved: {os.path.basename(file_path)}", fg=self.colors['accent_green'])
-                    messagebox.showinfo("Success", f"Saved!\n{file_path}")
+                    self.status_label.config(
+                        text=f"💾 Saved: {os.path.basename(file_path)}",
+                        fg=self.colors['accent_green']
+                    )
+                    messagebox.showinfo("✅ Success", f"Text saved successfully!\n\n{file_path}")
                 except Exception as e:
-                    messagebox.showerror("Error", str(e))
+                    messagebox.showerror("❌ Error", f"Failed to save:\n{str(e)}")
+        
+        def open_folder(self, folder_path):
+            """Open folder in file manager"""
+            if os.path.exists(folder_path):
+                system = platform.system()
+                if system == 'Windows':
+                    os.startfile(folder_path)
+                elif system == 'Darwin':
+                    subprocess.run(['open', folder_path])
+                else:
+                    subprocess.run(['xdg-open', folder_path])
         
         def open_download_folder(self):
             """Open download folder"""
-            if os.path.exists(Config.DOWNLOAD_DIR):
-                system = platform.system()
-                if system == 'Windows':
-                    os.startfile(Config.DOWNLOAD_DIR)
-                elif system == 'Darwin':
-                    subprocess.run(['open', Config.DOWNLOAD_DIR])
-                else:
-                    subprocess.run(['xdg-open', Config.DOWNLOAD_DIR])
+            self.open_folder(self.last_download_dir)
         
         def open_output_folder(self):
             """Open output folder"""
-            if os.path.exists(Config.OUTPUT_DIR):
-                system = platform.system()
-                if system == 'Windows':
-                    os.startfile(Config.OUTPUT_DIR)
-                elif system == 'Darwin':
-                    subprocess.run(['open', Config.OUTPUT_DIR])
-                else:
-                    subprocess.run(['xdg-open', Config.OUTPUT_DIR])
+            self.open_folder(Config.OUTPUT_DIR)
         
         def clear_all(self):
             """Clear all"""
@@ -1628,7 +1624,7 @@ if GUI_AVAILABLE:
             self.progress_label.config(text="Ready")
             self.image_path_var.set("No image selected")
             self.current_image_path = None
-            self.status_label.config(text="🗑️ Cleared | Developed by CHOWDHURY-VAI", fg=self.colors['text_dim'])
+            self.status_label.config(text="🗑️ All cleared | Developed by CHOWDHURY-VAI", fg=self.colors['text_dim'])
         
         def show_about(self):
             """About"""
@@ -1644,15 +1640,16 @@ if GUI_AVAILABLE:
 ║   📦 Built-in Libraries Only  ║
 ║   🌐 Cross-Platform           ║
 ║   🚀 Auto-Install Tesseract   ║
+║   💾 Smart Save Dialog        ║
 ║                                ║
 ║   ✅ Download Website Images  ║
 ║   ✅ Extract Text (OCR)       ║
 ║   ✅ Bangla + English         ║
-║   ✅ Smart Distro Detection   ║
+║   ✅ Choose Save Location     ║
 ║                                ║
 ╚══════════════════════════════════╝
             """
-            messagebox.showinfo("About", about)
+            messagebox.showinfo("ℹ️ About", about)
         
         def show_help(self):
             """Help"""
@@ -1661,9 +1658,11 @@ if GUI_AVAILABLE:
 
 📥 WEBSITE IMAGE DOWNLOADER:
 1. Enter website URL
-2. Select quality
-3. Click 'DOWNLOAD ALL IMAGES'
-4. Images saved in: downloaded_images/
+2. Click 'START DOWNLOAD'
+3. Choose save location from popup dialog
+4. Select image quality
+5. Confirm to start downloading
+6. Images saved in selected location
 
 📝 IMAGE TO TEXT (OCR):
 1. Click 'Browse' to select image
@@ -1671,21 +1670,23 @@ if GUI_AVAILABLE:
 3. Click 'EXTRACT TEXT'
 4. Copy or Save the text
 
-🔧 AUTO-INSTALL FEATURE:
-• Tesseract auto-installs on first run
-• Detects your Linux distribution
-• Installs all required packages
-• Use Tools > Reinstall Tesseract if needed
+💾 SAVE LOCATION FEATURES:
+• Popup dialog asks where to save
+• Shows current save location
+• Remembers last used location
+• Creates subfolder for each website
+• Option to change location anytime
 
 💡 TIPS:
-• The app will auto-detect missing Tesseract
-• Auto-install handles all package managers
-• Works on Ubuntu, Debian, Fedora, Arch, etc.
-• Use clear images for best OCR results
+• Click 'Change' to update save location
+• Use File > Set Download Location to preset
+• Downloaded images organized by domain
+• Tesseract auto-installs on first run
+• Clear images give best OCR results
 
 👨‍💻 DEVELOPED BY: CHOWDHURY-VAI
             """
-            messagebox.showinfo("Help", help_text)
+            messagebox.showinfo("📖 Help", help_text)
 
 
 # ==================== MAIN ====================
@@ -1693,7 +1694,7 @@ def main():
     """Main function"""
     print("\n" + "="*60)
     print("  🖼️  IMAGE TO TEXT & WEB DOWNLOADER")
-    print("  v" + Config.VERSION + " - Auto Install Edition")
+    print("  v" + Config.VERSION + " - Smart Save Edition")
     print("  Developed by " + Config.DEVELOPER)
     print("  NO EXTERNAL MODULES REQUIRED")
     print("="*60)
@@ -1725,6 +1726,18 @@ def main():
     try:
         root = tk.Tk()
         app = ImageToTextApp(root)
+        
+        # Load saved preferences
+        pref_file = os.path.join(Config.BASE_DIR, 'download_pref.json')
+        if os.path.exists(pref_file):
+            try:
+                with open(pref_file, 'r') as f:
+                    prefs = json.load(f)
+                    app.last_download_dir = prefs.get('last_download_dir', Config.DOWNLOAD_DIR)
+                    app.save_location_var.set(app.last_download_dir)
+            except:
+                pass
+        
         print("🚀 Application started!\n")
         root.mainloop()
     except KeyboardInterrupt:
