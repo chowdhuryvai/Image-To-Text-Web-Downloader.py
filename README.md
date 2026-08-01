@@ -8,7 +8,7 @@
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey.svg)
 ![Status](https://img.shields.io/badge/Status-Stable-brightgreen.svg)
 
-<img src="https://i.postimg.cc/tg9nW5zT/2026-07-31-075538.png" alt="Banner" width="800"/>
+<img src="https://i.postimg.cc/MZYvqwW4/2026-08-01-092118.png" alt="Banner" width="800"/>
 
 **🔧 NO EXTERNAL MODULES REQUIRED | 📦 BUILT-IN LIBRARIES ONLY**
 
