@@ -9,7 +9,7 @@
 ║     Works with Python Built-in Libraries Only               ║
 ║                                                              ║
 ║     Developed by: CHOWDHURY-VAI                             ║
-║     Version: 4.1.0 - Ultimate Standalone Edition            ║
+║     Version: 4.2.0 - Auto Install Edition                   ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
 """
@@ -60,7 +60,7 @@ except ImportError:
 class Config:
     """Application Configuration"""
     APP_NAME = "Image To Text & Web Downloader"
-    VERSION = "4.1.0"
+    VERSION = "4.2.0"
     DEVELOPER = "CHOWDHURY-VAI"
     
     # Paths
@@ -467,31 +467,68 @@ class PureOCR:
         self.tesseract_cmd = self._find_tesseract()
     
     def _find_tesseract(self):
-        """Find Tesseract installation"""
+        """Find Tesseract installation - Enhanced detection"""
+        # Check common installation paths
         possible_paths = [
             '/usr/bin/tesseract',
             '/usr/local/bin/tesseract',
             '/bin/tesseract',
             '/opt/bin/tesseract',
+            '/snap/bin/tesseract',
+            os.path.expanduser('~/.local/bin/tesseract'),
         ]
         
+        # Check if tesseract exists in any common path
         for path in possible_paths:
-            if os.path.exists(path):
+            if os.path.exists(path) and os.access(path, os.X_OK):
                 return path
         
+        # Use 'which' command (Linux/Mac)
         try:
             result = subprocess.run(['which', 'tesseract'], 
-                                   capture_output=True, text=True, timeout=5)
+                                   capture_output=True, text=True, timeout=5,
+                                   env={**os.environ, 'PATH': os.environ.get('PATH', '')})
             if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
+                tesseract_path = result.stdout.strip()
+                if os.path.exists(tesseract_path):
+                    return tesseract_path
         except:
             pass
         
+        # Use 'where' command (Windows)
         try:
             result = subprocess.run(['where', 'tesseract'], 
+                                   capture_output=True, text=True, timeout=5,
+                                   shell=True)
+            if result.returncode == 0 and result.stdout.strip():
+                tesseract_path = result.stdout.strip().split('\n')[0].strip()
+                if os.path.exists(tesseract_path):
+                    return tesseract_path
+        except:
+            pass
+        
+        # Try to find tesseract in PATH using 'command -v'
+        try:
+            result = subprocess.run(['command', '-v', 'tesseract'], 
                                    capture_output=True, text=True, timeout=5)
             if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip().split('\n')[0].strip()
+                tesseract_path = result.stdout.strip()
+                if os.path.exists(tesseract_path):
+                    return tesseract_path
+        except:
+            pass
+        
+        # Check if tesseract is available via type command
+        try:
+            result = subprocess.run(['type', 'tesseract'], 
+                                   capture_output=True, text=True, timeout=5, 
+                                   shell=True)
+            if result.returncode == 0:
+                match = re.search(r'tesseract is (/.+?/tesseract)', result.stdout)
+                if match:
+                    tesseract_path = match.group(1)
+                    if os.path.exists(tesseract_path):
+                        return tesseract_path
         except:
             pass
         
@@ -499,7 +536,15 @@ class PureOCR:
     
     def is_available(self):
         """Check if Tesseract is available"""
-        return self.tesseract_cmd is not None
+        if self.tesseract_cmd and os.path.exists(self.tesseract_cmd):
+            try:
+                # Verify tesseract actually works
+                result = subprocess.run([self.tesseract_cmd, '--version'], 
+                                       capture_output=True, text=True, timeout=5)
+                return result.returncode == 0
+            except:
+                return False
+        return False
     
     def get_version(self):
         """Get Tesseract version"""
@@ -526,7 +571,8 @@ class PureOCR:
         
         try:
             result = subprocess.run([self.tesseract_cmd, '--list-langs'], 
-                                   capture_output=True, text=True, timeout=5)
+                                   capture_output=True, text=True, timeout=5,
+                                   env={**os.environ, 'TESSDATA_PREFIX': os.environ.get('TESSDATA_PREFIX', '')})
             if result.returncode == 0:
                 langs = [lang.strip() for lang in result.stdout.split('\n')[1:] if lang.strip()]
                 return langs
@@ -547,6 +593,7 @@ class PureOCR:
             return "Error: Image file not found."
         
         output_file = None
+        output_base = None
         try:
             # Create temp output file
             fd, output_base = tempfile.mkstemp(suffix='_ocr')
@@ -561,7 +608,8 @@ class PureOCR:
                 '--psm', '6'
             ]
             
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
+                                   env={**os.environ, 'TESSDATA_PREFIX': os.environ.get('TESSDATA_PREFIX', '')})
             
             output_file = output_base + '.txt'
             if os.path.exists(output_file):
@@ -587,11 +635,14 @@ class PureOCR:
                     os.remove(output_file)
                 except:
                     pass
-            try:
-                if output_base and os.path.exists(output_base + '.txt'):
-                    os.remove(output_base + '.txt')
-            except:
-                pass
+            if output_base:
+                try:
+                    for ext in ['.txt', '.pdf', '.hocr', '.tsv']:
+                        cleanup_file = output_base + ext
+                        if os.path.exists(cleanup_file):
+                            os.remove(cleanup_file)
+                except:
+                    pass
     
     def preprocess_and_extract(self, image_path, language='eng+ben'):
         """Extract text from image"""
@@ -601,53 +652,265 @@ class PureOCR:
 
 # ==================== AUTO TESSERACT INSTALLER ====================
 class TesseractInstaller:
-    """Auto-install Tesseract OCR"""
+    """Auto-install Tesseract OCR - Enhanced for all Linux distributions"""
+    
+    @staticmethod
+    def _detect_linux_distro():
+        """Detect Linux distribution"""
+        distro_info = {
+            'name': 'unknown',
+            'version': '',
+            'package_manager': 'unknown',
+            'install_cmd': 'unknown'
+        }
+        
+        # Check /etc/os-release (most modern distros)
+        if os.path.exists('/etc/os-release'):
+            with open('/etc/os-release', 'r') as f:
+                content = f.read().lower()
+                
+                if any(d in content for d in ['ubuntu', 'debian', 'kali', 'mint', 'pop', 'elementary', 'zorin', 'linuxmint']):
+                    distro_info['name'] = 'debian'
+                    distro_info['package_manager'] = 'apt'
+                elif any(d in content for d in ['fedora', 'rhel', 'centos', 'rocky', 'alma']):
+                    distro_info['name'] = 'redhat'
+                    distro_info['package_manager'] = 'dnf'
+                elif any(d in content for d in ['arch', 'manjaro', 'endeavouros', 'garuda']):
+                    distro_info['name'] = 'arch'
+                    distro_info['package_manager'] = 'pacman'
+                elif any(d in content for d in ['opensuse', 'suse']):
+                    distro_info['name'] = 'suse'
+                    distro_info['package_manager'] = 'zypper'
+                elif 'alpine' in content:
+                    distro_info['name'] = 'alpine'
+                    distro_info['package_manager'] = 'apk'
+                elif 'void' in content:
+                    distro_info['name'] = 'void'
+                    distro_info['package_manager'] = 'xbps'
+                elif 'gentoo' in content:
+                    distro_info['name'] = 'gentoo'
+                    distro_info['package_manager'] = 'emerge'
+                elif 'solus' in content:
+                    distro_info['name'] = 'solus'
+                    distro_info['package_manager'] = 'eopkg'
+        
+        # Check for legacy distros
+        if distro_info['name'] == 'unknown' and os.path.exists('/etc/debian_version'):
+            distro_info['name'] = 'debian'
+            distro_info['package_manager'] = 'apt'
+        elif distro_info['name'] == 'unknown' and os.path.exists('/etc/redhat-release'):
+            distro_info['name'] = 'redhat'
+            distro_info['package_manager'] = 'dnf' if os.path.exists('/usr/bin/dnf') else 'yum'
+        elif distro_info['name'] == 'unknown' and os.path.exists('/etc/arch-release'):
+            distro_info['name'] = 'arch'
+            distro_info['package_manager'] = 'pacman'
+        
+        return distro_info
+    
+    @staticmethod
+    def _run_command_with_sudo(cmd, password=None):
+        """Run command with sudo, optionally providing password"""
+        try:
+            if password:
+                # Use sudo with password via stdin
+                full_cmd = ['sudo', '-S'] + cmd
+                result = subprocess.run(
+                    full_cmd,
+                    input=password + '\n',
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+            else:
+                # Try without password first (if NOPASSWD is set)
+                full_cmd = ['sudo'] + cmd
+                result = subprocess.run(
+                    full_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+            
+            return result.returncode == 0, result.stdout, result.stderr
+        except subprocess.TimeoutExpired:
+            return False, "", "Command timed out"
+        except Exception as e:
+            return False, "", str(e)
+    
+    @staticmethod
+    def _install_debian_based():
+        """Install on Debian/Ubuntu based systems"""
+        print("📦 Installing Tesseract on Debian/Ubuntu...")
+        
+        # Try multiple methods
+        methods = [
+            # Method 1: Direct apt-get with sudo
+            lambda: TesseractInstaller._run_command_with_sudo(
+                ['apt-get', 'update', '-y']
+            ),
+            # Method 2: apt-get without update first
+            lambda: (True, "", ""),
+        ]
+        
+        # Try update first
+        print("🔄 Updating package list...")
+        success, stdout, stderr = methods[0]()
+        if not success:
+            print("⚠️  Could not update, trying without update...")
+        
+        # Install packages
+        print("📥 Installing tesseract-ocr...")
+        success, stdout, stderr = TesseractInstaller._run_command_with_sudo(
+            ['apt-get', 'install', '-y', 'tesseract-ocr', 'tesseract-ocr-eng', 'tesseract-ocr-ben']
+        )
+        
+        if success:
+            print("✅ Installation successful!")
+            return True
+        else:
+            print(f"⚠️  APT install failed: {stderr}")
+            
+            # Try with pkexec
+            print("🔄 Trying pkexec...")
+            try:
+                result = subprocess.run(
+                    ['pkexec', 'apt-get', 'install', '-y', 'tesseract-ocr', 'tesseract-ocr-eng', 'tesseract-ocr-ben'],
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                if result.returncode == 0:
+                    print("✅ Installation successful via pkexec!")
+                    return True
+            except:
+                pass
+            
+            return False
+    
+    @staticmethod
+    def _install_redhat_based():
+        """Install on Fedora/RHEL based systems"""
+        print("📦 Installing Tesseract on Fedora/RHEL...")
+        
+        # Try DNF first
+        success, stdout, stderr = TesseractInstaller._run_command_with_sudo(
+            ['dnf', 'install', '-y', 'tesseract', 'tesseract-langpack-eng', 'tesseract-langpack-ben']
+        )
+        
+        if success:
+            print("✅ Installation successful!")
+            return True
+        
+        # Try YUM as fallback
+        print("🔄 Trying yum...")
+        success, stdout, stderr = TesseractInstaller._run_command_with_sudo(
+            ['yum', 'install', '-y', 'tesseract', 'tesseract-langpack-eng', 'tesseract-langpack-ben']
+        )
+        
+        if success:
+            print("✅ Installation successful!")
+            return True
+        
+        return False
+    
+    @staticmethod
+    def _install_arch_based():
+        """Install on Arch based systems"""
+        print("📦 Installing Tesseract on Arch...")
+        
+        success, stdout, stderr = TesseractInstaller._run_command_with_sudo(
+            ['pacman', '-S', '--noconfirm', 'tesseract', 'tesseract-data-eng', 'tesseract-data-ben']
+        )
+        
+        if success:
+            print("✅ Installation successful!")
+            return True
+        
+        return False
+    
+    @staticmethod
+    def _install_other_distro(package_manager):
+        """Install on other distributions"""
+        print(f"📦 Installing Tesseract using {package_manager}...")
+        
+        install_commands = {
+            'zypper': ['zypper', 'install', '-y', 'tesseract-ocr', 'tesseract-ocr-traineddata-english', 'tesseract-ocr-traineddata-bengali'],
+            'apk': ['apk', 'add', 'tesseract-ocr', 'tesseract-ocr-data-eng', 'tesseract-ocr-data-ben'],
+            'xbps': ['xbps-install', '-Sy', 'tesseract-ocr', 'tesseract-ocr-eng', 'tesseract-ocr-ben'],
+            'emerge': ['emerge', 'app-text/tesseract'],
+            'eopkg': ['eopkg', 'install', '-y', 'tesseract'],
+        }
+        
+        if package_manager in install_commands:
+            cmd = install_commands[package_manager]
+            if package_manager != 'apk':  # apk already runs as root
+                success, stdout, stderr = TesseractInstaller._run_command_with_sudo(cmd)
+            else:
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                    success = result.returncode == 0
+                except:
+                    success = False
+            
+            if success:
+                print("✅ Installation successful!")
+                return True
+        
+        return False
     
     @staticmethod
     def install():
-        """Install Tesseract based on OS"""
+        """Install Tesseract based on detected OS"""
         system = platform.system().lower()
         
         print("\n📦 Installing Tesseract OCR...")
+        print("="*50)
         
         try:
             if system == 'linux':
-                if os.path.exists('/etc/os-release'):
-                    with open('/etc/os-release') as f:
-                        content = f.read().lower()
-                    
-                    if any(d in content for d in ['ubuntu', 'debian', 'kali', 'mint', 'pop']):
-                        print("Detected Debian/Ubuntu based system")
-                        subprocess.run(['sudo', 'apt-get', 'update'], check=False)
-                        subprocess.run([
-                            'sudo', 'apt-get', 'install', '-y',
-                            'tesseract-ocr', 'tesseract-ocr-eng', 'tesseract-ocr-ben'
-                        ], check=False)
-                        return True
-                    
-                    elif any(d in content for d in ['fedora', 'rhel', 'centos']):
-                        print("Detected Fedora/RHEL based system")
-                        subprocess.run([
-                            'sudo', 'dnf', 'install', '-y',
-                            'tesseract', 'tesseract-langpack-eng', 'tesseract-langpack-ben'
-                        ], check=False)
-                        return True
-                    
-                    elif any(d in content for d in ['arch', 'manjaro']):
-                        print("Detected Arch based system")
-                        subprocess.run([
-                            'sudo', 'pacman', '-S', '--noconfirm',
-                            'tesseract', 'tesseract-data-eng', 'tesseract-data-ben'
-                        ], check=False)
-                        return True
+                distro = TesseractInstaller._detect_linux_distro()
+                print(f"🐧 Detected: {distro['name'].upper()} Linux")
+                print(f"📦 Package Manager: {distro['package_manager']}")
+                
+                # Try installation based on detected distro
+                if distro['package_manager'] == 'apt':
+                    return TesseractInstaller._install_debian_based()
+                elif distro['package_manager'] in ('dnf', 'yum'):
+                    return TesseractInstaller._install_redhat_based()
+                elif distro['package_manager'] == 'pacman':
+                    return TesseractInstaller._install_arch_based()
+                else:
+                    return TesseractInstaller._install_other_distro(distro['package_manager'])
             
-            print("\n⚠️  Could not auto-install Tesseract.")
-            print("Please install manually:")
-            print("  sudo apt-get install tesseract-ocr tesseract-ocr-eng tesseract-ocr-ben")
-            return False
+            elif system == 'darwin':
+                # macOS installation
+                return TesseractInstaller._install_macos()
             
+            else:
+                print(f"⚠️  Automatic installation not supported on {system}")
+                return False
+                
         except Exception as e:
-            print(f"\n❌ Installation failed: {e}")
+            print(f"❌ Installation error: {e}")
+            return False
+    
+    @staticmethod
+    def _install_macos():
+        """Install on macOS using Homebrew"""
+        print("🍎 Installing Tesseract on macOS...")
+        
+        try:
+            # Check for Homebrew
+            result = subprocess.run(['which', 'brew'], capture_output=True, text=True)
+            if result.returncode == 0:
+                subprocess.run(['brew', 'install', 'tesseract'], check=False)
+                subprocess.run(['brew', 'install', 'tesseract-lang'], check=False)
+                print("✅ Installation successful!")
+                return True
+            else:
+                print("⚠️  Homebrew not found")
+                return False
+        except:
             return False
 
 
@@ -700,7 +963,9 @@ if GUI_AVAILABLE:
             # Create GUI
             self.setup_menu()
             self.create_widgets()
-            self.check_tesseract_status()
+            
+            # Check and auto-install Tesseract if needed
+            self.root.after(500, self.check_and_auto_install_tesseract)
         
         def setup_menu(self):
             """Setup menu bar"""
@@ -722,7 +987,7 @@ if GUI_AVAILABLE:
             tools_menu.add_command(label="📁 Open Downloads", command=self.open_download_folder)
             tools_menu.add_command(label="📁 Open Output", command=self.open_output_folder)
             tools_menu.add_separator()
-            tools_menu.add_command(label="🔧 Install Tesseract", command=self.install_tesseract)
+            tools_menu.add_command(label="🔧 Reinstall Tesseract", command=self.reinstall_tesseract)
             tools_menu.add_command(label="🗑️ Clear All", command=self.clear_all)
             
             # Help menu
@@ -760,7 +1025,7 @@ if GUI_AVAILABLE:
             
             tk.Label(
                 header_frame,
-                text=f"Developed by {Config.DEVELOPER} | v{Config.VERSION} | No External Modules",
+                text=f"Developed by {Config.DEVELOPER} | v{Config.VERSION} | Auto-Install Edition",
                 font=('Arial', 9),
                 fg=self.colors['text_dim'],
                 bg=self.colors['bg_medium']
@@ -796,7 +1061,7 @@ if GUI_AVAILABLE:
             
             self.status_label = tk.Label(
                 status_frame,
-                text="✅ Ready | Developed by CHOWDHURY-VAI",
+                text="🚀 Starting... | Developed by CHOWDHURY-VAI",
                 font=('Arial', 8),
                 fg=self.colors['accent_green'],
                 bg=self.colors['bg_light'],
@@ -946,46 +1211,216 @@ if GUI_AVAILABLE:
                      bg=self.colors['accent_red'], fg='white', relief='flat', cursor='hand2',
                      padx=15, pady=5).pack(side='right')
         
-        # ==================== FUNCTIONALITY ====================
-        def check_tesseract_status(self):
-            """Check Tesseract status"""
+        # ==================== AUTO INSTALL & CHECK ====================
+        def check_and_auto_install_tesseract(self):
+            """Check Tesseract status and auto-install if missing"""
+            if self.ocr.is_available():
+                # Tesseract found - update status
+                self.update_tesseract_status()
+            else:
+                # Tesseract not found - ask to auto-install
+                self.status_label.config(
+                    text="🔍 Tesseract not found. Preparing auto-install...",
+                    fg=self.colors['accent_orange']
+                )
+                self.root.update()
+                
+                # Ask user
+                response = messagebox.askyesno(
+                    "Tesseract OCR Required",
+                    "Tesseract OCR is needed for text extraction from images.\n\n"
+                    "Do you want to install it automatically?\n\n"
+                    "✅ Automatic installation (recommended)\n"
+                    "• Detects your Linux distribution\n"
+                    "• Installs Tesseract + English & Bangla languages\n"
+                    "• May ask for sudo password\n\n"
+                    "Click 'Yes' to auto-install now.\n"
+                    "Click 'No' to install later from Tools menu."
+                )
+                
+                if response:
+                    self.auto_install_tesseract()
+                else:
+                    self.status_label.config(
+                        text="⚠️ Tesseract not installed | Use Tools > Reinstall Tesseract",
+                        fg=self.colors['accent_orange']
+                    )
+        
+        def auto_install_tesseract(self):
+            """Automatically install Tesseract with progress tracking"""
+            # Disable extract button during install
+            self.extract_btn.config(state='disabled', text="⏳ Installing Tesseract...")
+            self.status_label.config(
+                text="📦 Installing Tesseract... Please wait...",
+                fg=self.colors['accent_orange']
+            )
+            
+            # Show installation dialog
+            install_window = tk.Toplevel(self.root)
+            install_window.title("Installing Tesseract")
+            install_window.geometry("500x300")
+            install_window.configure(bg=self.colors['bg_medium'])
+            install_window.transient(self.root)
+            install_window.grab_set()
+            
+            # Center the window
+            install_window.update_idletasks()
+            x = self.root.winfo_x() + (self.root.winfo_width() - 500) // 2
+            y = self.root.winfo_y() + (self.root.winfo_height() - 300) // 2
+            install_window.geometry(f"+{x}+{y}")
+            
+            tk.Label(
+                install_window,
+                text="📦 Installing Tesseract OCR",
+                font=('Arial', 14, 'bold'),
+                fg=self.colors['accent'],
+                bg=self.colors['bg_medium']
+            ).pack(pady=20)
+            
+            status_text = tk.Text(
+                install_window,
+                height=8,
+                width=55,
+                font=('Courier', 9),
+                bg=self.colors['input_bg'],
+                fg=self.colors['text'],
+                relief='flat',
+                padx=10,
+                pady=10
+            )
+            status_text.pack(pady=10)
+            
+            progress = ttk.Progressbar(install_window, mode='indeterminate')
+            progress.pack(pady=10, padx=20, fill='x')
+            progress.start()
+            
+            def run_install():
+                try:
+                    status_text.insert('end', "🔍 Detecting Linux distribution...\n")
+                    install_window.update()
+                    
+                    success = TesseractInstaller.install()
+                    
+                    if success:
+                        status_text.insert('end', "✅ Installation completed!\n")
+                        status_text.insert('end', "🔄 Verifying installation...\n")
+                        install_window.update()
+                        
+                        # Re-initialize OCR
+                        self.ocr = PureOCR()
+                        
+                        if self.ocr.is_available():
+                            version = self.ocr.get_version()
+                            langs = self.ocr.get_languages()
+                            status_text.insert('end', f"✅ Tesseract v{version} ready!\n")
+                            status_text.insert('end', f"📚 Languages: {', '.join(langs)}\n")
+                            
+                            install_window.after(1500, lambda: [
+                                install_window.destroy(),
+                                self.update_tesseract_status(),
+                                messagebox.showinfo(
+                                    "Success",
+                                    f"✅ Tesseract installed successfully!\n\n"
+                                    f"Version: {version}\n"
+                                    f"Languages: {', '.join(langs)}\n\n"
+                                    "You can now extract text from images."
+                                )
+                            ])
+                        else:
+                            status_text.insert('end', "⚠️ Installed but not detected. Please restart the app.\n")
+                            install_window.after(2000, lambda: [
+                                install_window.destroy(),
+                                self.status_label.config(
+                                    text="⚠️ Please restart the application",
+                                    fg=self.colors['accent_orange']
+                                )
+                            ])
+                    else:
+                        status_text.insert('end', "❌ Automatic installation failed.\n")
+                        status_text.insert('end', "\n📖 Manual installation:\n")
+                        status_text.insert('end', "sudo apt-get update\n")
+                        status_text.insert('end', "sudo apt-get install tesseract-ocr\n")
+                        status_text.insert('end', "sudo apt-get install tesseract-ocr-eng\n")
+                        status_text.insert('end', "sudo apt-get install tesseract-ocr-ben\n")
+                        
+                        install_window.after(3000, lambda: [
+                            install_window.destroy(),
+                            self.status_label.config(
+                                text="⚠️ Installation failed | Try manual install",
+                                fg=self.colors['accent_red']
+                            )
+                        ])
+                
+                except Exception as e:
+                    status_text.insert('end', f"❌ Error: {str(e)}\n")
+                    install_window.after(2000, lambda: [
+                        install_window.destroy(),
+                        self.status_label.config(
+                            text=f"❌ Installation error",
+                            fg=self.colors['accent_red']
+                        )
+                    ])
+                
+                finally:
+                    self.extract_btn.config(state='normal', text="🔍 EXTRACT TEXT", bg=self.colors['accent_purple'])
+                    progress.stop()
+            
+            thread = threading.Thread(target=run_install, daemon=True)
+            thread.start()
+        
+        def reinstall_tesseract(self):
+            """Reinstall Tesseract from Tools menu"""
+            response = messagebox.askyesno(
+                "Reinstall Tesseract",
+                "This will reinstall Tesseract OCR.\n\n"
+                "Use this if:\n"
+                "• Tesseract is not working properly\n"
+                "• Language packs are missing\n"
+                "• You want to update to latest version\n\n"
+                "Continue?"
+            )
+            
+            if response:
+                self.auto_install_tesseract()
+        
+        def update_tesseract_status(self):
+            """Update Tesseract status display"""
             if self.ocr.is_available():
                 version = self.ocr.get_version()
                 langs = self.ocr.get_languages()
                 
-                status = f"✅ Tesseract v{version or '?'} | "
-                status += f"Bangla: {'✅' if 'ben' in langs else '⚠️'} | "
-                status += f"English: {'✅' if 'eng' in langs else '⚠️'} | "
-                status += "Developed by CHOWDHURY-VAI"
+                status_parts = [f"✅ Tesseract v{version or '?'}"]
                 
-                self.status_label.config(text=status, fg=self.colors['accent_green'])
+                has_eng = 'eng' in langs
+                has_ben = 'ben' in langs
+                
+                if has_eng:
+                    status_parts.append("English: ✅")
+                else:
+                    status_parts.append("English: ⚠️")
+                
+                if has_ben:
+                    status_parts.append("Bangla: ✅")
+                else:
+                    status_parts.append("Bangla: ⚠️")
+                
+                status_parts.append("Developed by CHOWDHURY-VAI")
+                
+                self.status_label.config(
+                    text=" | ".join(status_parts),
+                    fg=self.colors['accent_green']
+                )
+                
+                # Update language options
+                if not has_ben:
+                    self.lang_var.set("English")
             else:
                 self.status_label.config(
-                    text="⚠️ Tesseract not found | Tools > Install Tesseract | Developed by CHOWDHURY-VAI",
+                    text="⚠️ Tesseract not found | Tools > Reinstall Tesseract",
                     fg=self.colors['accent_orange']
                 )
         
-        def install_tesseract(self):
-            """Install Tesseract"""
-            response = messagebox.askyesno(
-                "Install Tesseract",
-                "Do you want to install Tesseract OCR?\n\n"
-                "This is required for text extraction.\n"
-                "Installation may take a few minutes."
-            )
-            
-            if response:
-                self.status_label.config(text="📦 Installing Tesseract...", fg=self.colors['accent_orange'])
-                self.root.update()
-                
-                def install_thread():
-                    TesseractInstaller.install()
-                    self.root.after(0, self.check_tesseract_status)
-                    self.root.after(0, lambda: messagebox.showinfo("Done", "Installation complete!\nPlease restart the app."))
-                
-                thread = threading.Thread(target=install_thread, daemon=True)
-                thread.start()
-        
+        # ==================== FUNCTIONALITY ====================
         def paste_url(self):
             """Paste URL"""
             try:
@@ -1081,15 +1516,20 @@ if GUI_AVAILABLE:
                 return
             
             if not self.ocr.is_available():
-                if messagebox.askyesno("Tesseract Not Found", "Install Tesseract now?"):
-                    self.install_tesseract()
+                response = messagebox.askyesno(
+                    "Tesseract Required",
+                    "Tesseract OCR is not installed.\n\n"
+                    "Do you want to install it now?"
+                )
+                if response:
+                    self.auto_install_tesseract()
                 return
             
             self.processing = True
             language = Config.LANGUAGES[self.lang_var.get()]
             
             self.extract_btn.config(state='disabled', text="⏳ Extracting...", bg=self.colors['accent_orange'])
-            self.status_label.config(text="🔍 Extracting...", fg=self.colors['accent_orange'])
+            self.status_label.config(text="🔍 Extracting text...", fg=self.colors['accent_orange'])
             self.text_display.delete(1.0, 'end')
             self.text_display.insert(1.0, "⏳ Processing... Please wait...")
             
@@ -1203,11 +1643,12 @@ if GUI_AVAILABLE:
 ║   🔧 NO EXTERNAL MODULES      ║
 ║   📦 Built-in Libraries Only  ║
 ║   🌐 Cross-Platform           ║
+║   🚀 Auto-Install Tesseract   ║
 ║                                ║
 ║   ✅ Download Website Images  ║
 ║   ✅ Extract Text (OCR)       ║
 ║   ✅ Bangla + English         ║
-║   ✅ Auto Tesseract Install   ║
+║   ✅ Smart Distro Detection   ║
 ║                                ║
 ╚══════════════════════════════════╝
             """
@@ -1230,21 +1671,21 @@ if GUI_AVAILABLE:
 3. Click 'EXTRACT TEXT'
 4. Copy or Save the text
 
+🔧 AUTO-INSTALL FEATURE:
+• Tesseract auto-installs on first run
+• Detects your Linux distribution
+• Installs all required packages
+• Use Tools > Reinstall Tesseract if needed
+
 💡 TIPS:
-• Install Tesseract: Tools > Install Tesseract
-• Or: sudo apt-get install tesseract-ocr
+• The app will auto-detect missing Tesseract
+• Auto-install handles all package managers
+• Works on Ubuntu, Debian, Fedora, Arch, etc.
 • Use clear images for best OCR results
-• Bangla+English for mixed content
 
 👨‍💻 DEVELOPED BY: CHOWDHURY-VAI
             """
             messagebox.showinfo("Help", help_text)
-
-else:
-    # GUI not available - create placeholder
-    class ImageToTextApp:
-        def __init__(self, *args, **kwargs):
-            pass
 
 
 # ==================== MAIN ====================
@@ -1252,7 +1693,7 @@ def main():
     """Main function"""
     print("\n" + "="*60)
     print("  🖼️  IMAGE TO TEXT & WEB DOWNLOADER")
-    print("  v" + Config.VERSION + " - Standalone Edition")
+    print("  v" + Config.VERSION + " - Auto Install Edition")
     print("  Developed by " + Config.DEVELOPER)
     print("  NO EXTERNAL MODULES REQUIRED")
     print("="*60)
@@ -1263,16 +1704,6 @@ def main():
     if not GUI_AVAILABLE:
         print("\n❌ GUI mode not available. Tkinter is required.")
         print("📦 Install: sudo apt-get install python3-tk")
-        
-        # Try to install
-        if platform.system().lower() == 'linux':
-            print("\n📦 Attempting to install tkinter...")
-            try:
-                subprocess.run(['sudo', 'apt-get', 'install', '-y', 'python3-tk'], check=False)
-                print("✅ Please restart the application.")
-            except:
-                print("❌ Could not install. Please install manually.")
-        
         sys.exit(1)
     
     # Check Tesseract
@@ -1285,7 +1716,7 @@ def main():
             print(f"📚 Languages: {', '.join(langs)}")
     else:
         print("\n⚠️  Tesseract not found")
-        print("   Use Tools > Install Tesseract in the app")
+        print("   Auto-install will start when GUI opens")
     
     print("\n📁 Downloads:", Config.DOWNLOAD_DIR)
     print("📁 Output:", Config.OUTPUT_DIR)
